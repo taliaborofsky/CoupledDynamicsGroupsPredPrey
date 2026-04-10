@@ -62,13 +62,13 @@ function get_meanx(g::AbstractMatrix, x_max::Int, p::AbstractMatrix)
     g is a 2d matrix
     """
     x_vec = 1:x_max
-    numerator = (x_vec.^2) .* g
+    numerator = @. (x_vec^2) * g
     #mask = (p .> 1e-10) .& all(g .> 0, dims=1)
     mask = p.>1e-10
     numerator_sum = sum(numerator, dims=1)
     ans = copy(p)
-    ans[mask] .= numerator_sum[mask] ./ p[mask]
-    ans[.!mask] .= 1.0
+    ans[mask] = @. numerator_sum[mask] / p[mask]
+    @. ans[!mask] = 1.0
     return ans
 end
 
@@ -77,7 +77,7 @@ function get_meanx_nosingle(g::AbstractVector, x_max::Int, P::Number)
     Expected group size an individual belongs to if it is in a group
     =#
     x_vec = 2:x_max
-    numerator = x_vec.^2 .* g[2:end]
+    numerator = @. x_vec^2 * g[2:end]
     if P < 1e-10 
         return 1.0
     else
@@ -99,7 +99,7 @@ function get_meanx(g::AbstractVector, x_max::Int, p::Number)
     will add method for p a vector and g a matrix later
     =#
     x_vec = 1:x_max
-    numerator = x_vec.^2 .* g
+    numerator = @. x_vec^2 * g
     if p < 1e-10 #&& all(g .< 1e-10)
         return 1.0
     else
@@ -118,22 +118,24 @@ end
 
 function get_prob_in_x(g::AbstractMatrix, p::AbstractVector, x_max)
     # find prob in group of size x, for g a matrix and p a vector
+    # if length of p is n, then dimensions of g need to be n x x_max
+
         x=1:x_max
-        num_in_gx = g .* x'
-        prob_in_x = num_in_gx ./ p
+        num_in_gx = @. g * x'
+        prob_in_x = @. num_in_gx / p
     end
 
 function get_prob_in_x(g::AbstractMatrix, p::Number, x_max)
     # find prob in group of size x, for g a matrix and p a vector
         x=1:x_max
-        num_in_gx = g .* x'
-        prob_in_x = num_in_gx ./ p
+        num_in_gx = @. g * x'
+        prob_in_x = @. num_in_gx / p
     end
     
 function get_prob_in_x(g::AbstractVector, p::Number, x_max)
     x = 1:x_max
-    num_in_gx = g .* x
-    prob_in_x = num_in_gx ./p
+    num_in_gx = @. g * x
+    prob_in_x = @. num_in_gx / p
 end
 
 

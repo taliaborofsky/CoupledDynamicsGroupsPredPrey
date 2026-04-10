@@ -35,7 +35,7 @@ export recordFromSolution_nog, diagram_2_recursion, diagram_2_recursion_nog
 export make_and_save_nice_plots, make_and_save_nice_plots_nog
 export plot_comparison_branches, plot_comparison_branches_filtered
 export continue_sp
-export equilibrium_nogroups
+export equilibrium_nogroups, equilibrium_nogroups_N1extinct, equilibrium_nogroups_N2extinct
 export recordFromSolution_1Prey, do_base_continuations_1prey, make_and_save_nice_plots_1prey
 
 ylabel_dic = Dict(
@@ -188,6 +188,11 @@ param_label_dic = Dict(
         layout = (1, 2), legend = false, 
         ylims_list = fill([-0.01, 1.05], length(vars_list)),
         plot_special_points = true)
+
+        # if br_list is named tuple
+        branches = br_list isa NamedTuple ? values(br_list) : br_list
+        
+        # labels for y axis
         ylabel_dic = Dict(
             :N1 => L"N_1",
             :N2 => L"N_2",
@@ -195,13 +200,14 @@ param_label_dic = Dict(
             :P => L"p"
         )
         
+        # other plottin gpreferences
         opts = (linewidthunstable = 1, linewidthstable = 3, 
             plotspecialpoints = plot_special_points)
         plt_list = []
         for i in 1:length(vars_list)  # Iterate over indices of vars_list
             vars = vars_list[i]
             ylab = ylabel_dic[vars[2]]
-            plt = plot(br_list..., vars = vars; 
+            plt = plot(branches..., vars = vars; 
                     ylims = ylims_list[i], 
                     ylabel = ylab, opts...)
             push!(plt_list, plt)
@@ -277,7 +283,7 @@ param_label_dic = Dict(
         #g_out = get_g_equilibria(1.5, 0.3, 0.3, p_nt)
         #u0[3:end] = g_out
         #set last point as initialcondition
-        u0 = iterate_to_last_pt_scaled(u0, p_nt; tf = 500)
+        u0 = iterate_to_last_pt_scaled(u0, p_nt; tf = 1000)
         br_co = do_continuation(u0, p_nt; kargs...)
 
         #### predators extinct
@@ -287,7 +293,7 @@ param_label_dic = Dict(
 
         ##### small prey extinct
         u0 = [1.0,0,fill(0.1,x_max)...]
-        u2 = iterate_to_last_pt_scaled(u0, p_nt; tf = 10000)
+        u2 = iterate_to_last_pt_scaled(u0, p_nt; tf = 1000)
         br_N2_extinct = do_continuation(u2, p_nt; kargs...)
 
         #### big prey extinct
@@ -355,6 +361,26 @@ param_label_dic = Dict(
     end
 
 # No Group Dynamics
+    """
+        equilibrium_nogroups(params) -> [N1, N2, P]
+
+    Compute the coexistence equilibrium (N1 > 0, N2 > 0, P > 0) of the
+    population-dynamics-only system (no group-structure dynamics) for a
+    fixed group size `x`.
+
+    Uses the analytical solution obtained by setting dN1/dt = dN2/dt = dP/dt = 0
+    and solving for the scaled prey and predator densities.
+
+    # Arguments
+    - `params`: a NamedTuple (or similar) containing at least:
+      `η1`, `η2`, `β1`, `β2`, `x`, `A1`, `A2`, `α2_of_1`,
+      `H1a`, `H1b`, `H2a`, `H2b`, and whatever `fun_alpha1` requires.
+
+    # Returns
+    - A 3-element vector `[N1, N2, P]` — the coexistence equilibrium densities.
+      Values may be negative or non-physical when no true coexistence equilibrium
+      exists for the given parameters.
+    """
     function equilibrium_nogroups(params)
         @unpack η1, η2, β1, β2 = params
         @unpack x, A1, A2, α2_of_1, H1a, H1b, H2a, H2b = params
@@ -381,6 +407,84 @@ param_label_dic = Dict(
 
         return [N1, N2, P]
 
+    end
+
+    """
+        equilibrium_nogroups_N1extinct(params) -> [0, N2, P]
+
+    Compute the boundary equilibrium where big prey is absent (N1 = 0)
+    but small prey and predators persist (N2 > 0, P > 0), for the
+    population-dynamics-only system at fixed group size `x`.
+
+    From the appendix (CH_Appendix7, §\\ref{ax:pop_dyn_only_equilibria}):
+    ```
+    N2* = x * td / (α2 * (β2*A2 - x*H2(x)*td))
+    P*  = (η2 * β2 / td) * N2* * (1 - N2*)
+    ```
+    where `td = 1 - η1 - η2` is the scaled death rate.
+
+    This equilibrium exists when `β2*A2 > x*H2(x)*td` and `0 < N2 ≤ 1`.
+
+    # Arguments
+    - `params`: a NamedTuple (or similar) containing at least:
+      `η1`, `η2`, `β2`, `x`, `A2`, `α2_of_1`, `H2a`, `H2b`.
+
+    # Returns
+    - A 3-element vector `[0, N2, P]`.
+      Values may be non-physical when the equilibrium does not exist
+      for the given parameters.
+    """
+    function equilibrium_nogroups_N1extinct(params)
+        @unpack η1, η2, β2 = params
+        @unpack x, A2, α2_of_1, H2a, H2b = params
+
+        H2 = H2a + H2b/x
+        td = 1 - η1 - η2
+
+        N2 = x * td / (α2_of_1 * (β2 * A2 - x * H2 * td))
+        P  = (η2 * β2 / td) * N2 * (1 - N2)
+
+        return [0.0, N2, P]
+    end
+
+    """
+        equilibrium_nogroups_N2extinct(params) -> [N1, 0, P]
+
+    Compute the boundary equilibrium where small prey is absent (N2 = 0)
+    but big prey and predators persist (N1 > 0, P > 0), for the
+    population-dynamics-only system at fixed group size `x`.
+
+    From the appendix (CH_Appendix7, eq.~\\ref{ax:equilibrium_one_prey}):
+    ```
+    N1* = x * td / (α1(x) * (β1*A1 - x*H1(x)*td))
+    P*  = (η1 * β1 / td) * N1* * (1 - N1*)
+    ```
+    where `td = 1 - η1 - η2` is the scaled death rate.
+
+    This equilibrium exists when `β1*A1 > x*H1(x)*td` and `0 < N1 ≤ 1`.
+
+    # Arguments
+    - `params`: a NamedTuple (or similar) containing at least:
+      `η1`, `η2`, `β1`, `x`, `A1`, `H1a`, `H1b`,
+      and whatever `fun_alpha1` requires.
+
+    # Returns
+    - A 3-element vector `[N1, 0, P]`.
+      Values may be non-physical when the equilibrium does not exist
+      for the given parameters.
+    """
+    function equilibrium_nogroups_N2extinct(params)
+        @unpack η1, η2, β1 = params
+        @unpack x, A1, H1a, H1b = params
+
+        α1 = fun_alpha1(x, params)
+        H1 = H1a + H1b/x
+        td = 1 - η1 - η2
+
+        N1 = x * td / (α1 * (β1 * A1 - x * H1 * td))
+        P  = (η1 * β1 / td) * N1 * (1 - N1)
+
+        return [N1, 0.0, P]
     end
 
 
@@ -749,6 +853,7 @@ param_label_dic = Dict(
                     p_nt, p_nt.x_max; lens = lens, p_min = p_min, 
                     p_max = p_max,systemfunction = systemfunction,
                     dsmax = dsmax)
+                println("did base continuations")
             end
         end
         
@@ -800,7 +905,6 @@ param_label_dic = Dict(
         colorblind_palette = [colorblind_palette..., # doing this allows us to handle more branches
         colorblind_palette..., colorblind_palette...]
         for (j, branch) in enumerate(br_list)
-            print()
             out_nt = fun_filter_mat(branch, x_max; type_system = type_system)
             if !isempty(out_nt.param)  # Check if out_nt.param is not empty
                 plot_segments!(out_nt.param, getfield(out_nt, y_axis_symbol), Bool.(out_nt.stable); 
@@ -895,7 +999,6 @@ param_label_dic = Dict(
         savefig(pltNsum, bif_fig_path*"Nsum_"*fn_string_base*".pdf")
 
         if has_g
-            print("hi")
             pltxbar = plot_nice_bif(
                 br_list, :mean_x, param_key, has_g = has_g
                 )
@@ -938,7 +1041,7 @@ param_label_dic = Dict(
         else
             record_from_solution = recordFromSolution
         end
-        print(u0)
+        # print(u0)
 
         prob = BifurcationProblem(systemfunction, u0, p_nt,
             # specify the continuation parameter)

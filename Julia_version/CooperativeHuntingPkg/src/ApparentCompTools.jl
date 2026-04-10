@@ -127,8 +127,8 @@ function get_∂N2_∂N1(Jac_full)
     """
     This obtains ∂N2 / ∂N1.
     To find apparent competition, we solve the equation:
-        -(∂U₂, Q₁, Q₂, ... Qₓₘ all with respect to N₁)
-        = J_apparent * (∂N₂, g(1), g(2), ..., g(xₘ) all with respect to N₁),
+        -(∂U₂, Q₁, Q₂, ... Qₓₘ derived all with respect to N1)
+        = J_apparent * (∂N₂, g(1), g(2), ..., g(xₘ) derived all with respect to N₁),
     where J_apparent is the full Jacobian of the system without the partial derivatives wrt N₁.
     i.e., without the first row and column (note U₂ is the right side of dN₂/dT, Qᵢ is the right side of dgᵢ/dT).
 
@@ -144,7 +144,7 @@ function get_∂N2_∂N1(Jac_full)
     Jac_apparent = Jac_full[2:end, 2:end]
 
     # Get the left side of the equation
-    left_side_eqn = -Jac_full[2:end, 1]
+    left_side_eqn = -Jac_full[2:end, 1] # 1st column except for first row
 
     # Solve for partial derivatives
     pdv_N1 = Jac_apparent \ left_side_eqn
@@ -172,7 +172,7 @@ function get_∂N1_∂N2(Jac_full)
     Returns:
     - The partial derivative of N₂ with respect to N₁ (Float64)
     """
-    # Trim the first row and column
+    # Trim the second row and column
     Jac_apparent = Jac_full[1:end .!=2, 1:end .!=2]
 
     # Get the left side of the equation... the 2nd col of the jacobian without the 2nd row

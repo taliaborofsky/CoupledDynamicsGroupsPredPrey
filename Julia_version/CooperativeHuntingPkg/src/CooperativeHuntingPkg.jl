@@ -40,7 +40,7 @@ export recordFromSolution_nog, diagram_2_recursion, diagram_2_recursion_nog
 export make_and_save_nice_plots, make_and_save_nice_plots_nog
 export plot_comparison_branches, plot_comparison_branches_filtered
 export continue_sp
-export equilibrium_nogroups
+export equilibrium_nogroups, equilibrium_nogroups_N1extinct, equilibrium_nogroups_N2extinct
 export recordFromSolution_1Prey, do_base_continuations_1prey, make_and_save_nice_plots_1prey
 # ApparentCompTools
 export Jacobian, Jacobian_g, get_∂N2_∂N1, get_∂N1_∂N2
@@ -50,5 +50,11 @@ export find_mangel_clark, get_g_equilibria, classify_equilibrium_g
 export update_params, bifurcation_g_input, get_x_maximizes_pc_fitness
 export heatmap_bif_g
 export get_g_equilibria_givenW
+export fun_dg_births_constantP!
+export fun_dg_births_constantP
+export fun_W_gauss, bifurcation_g_input_simpleW
+export fun_dg_simpleW!, fun_dg_simpleW, classify_equilibrium_g_simpleW
+export make_hm_versus_param
+
 
 end

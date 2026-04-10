@@ -14,7 +14,7 @@ export CoupledDynamics_1Prey_ODE, CoupledDynamics_1Prey_ODE!
 
 function CoupledDynamics_1Prey_ODE(u,p,T=0)
 
-    du = copy(u).*0
+    du = @. copy(u)*0
 
 
     CoupledDynamics_1Prey_ODE!(du,u,p,T)
@@ -133,7 +133,7 @@ function fun_dg!(du, u, p, T)
 end
 
 function system_scaled_nogroups(u,p,T=0)
-    du = copy(u).*0
+    du = @. copy(u)*0
     system_scaled_nogroups!(du,u,p,T)
     return du
 end
@@ -198,7 +198,7 @@ function fun_dN1dT!(du, u, p,T)
     
     x_vec = 1:x_max
     tildef1_of_x = fun_f1(x_vec, N1, N2, p)  
-    du[1] = η1 * N1 * (1 - N1) - sum(g_of_x_vec .* tildef1_of_x)
+    du[1] = η1 * N1 * (1 - N1) - sum(@. g_of_x_vec * tildef1_of_x)
     
 end
 
@@ -222,7 +222,7 @@ function fun_dN2dT!(du, u, p,T)
     
     x_vec = 1:x_max
     tildef2_of_x = fun_f2(x_vec, N1, N2, p)  
-    du[2] = η2 * N2 * (1 - N2) - sum(g_of_x_vec .* tildef2_of_x)
+    du[2] = η2 * N2 * (1 - N2) - sum(@. g_of_x_vec * tildef2_of_x)
     
 end
 """ 
@@ -239,14 +239,14 @@ function fun_dg_nopop!(dg, g, params, T)
     # Compute fitnesses and best response functions
     Wvec = fun_W(xvec, N1, N2, params)
     S_1_x = fun_S_given_W(Wvec[1], Wvec, params)
-    S_x_1 = 1 .- S_1_x
-    g_x_max = P - sum(xvec[1:end-1] .* g[1:end])
+    S_x_1 = @. 1 - S_1_x
+    g_x_max = P - sum(@. xvec[1:end-1] * g[1:end])
     g = [g..., g_x_max]
     for x in 1:(x_max-1)
         if x == 1
             groups_2_split = 4 * g[2] * S_1_x[2] 
-            leave_larger_grps = sum(xvec[3:end] .* g[3:end] .* S_1_x[3:end])
-            join_groups = -(g[1]) * sum(g[1:end-1] .* S_x_1[2:end])
+            leave_larger_grps = sum(@. xvec[3:end] * g[3:end] * S_1_x[3:end])
+            join_groups = -(g[1]) * sum(@. g[1:end-1] * S_x_1[2:end])
             dg[1] = (groups_2_split + leave_larger_grps + join_groups)/Tg
 
         elseif x == 2
