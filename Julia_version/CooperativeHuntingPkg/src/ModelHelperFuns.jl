@@ -2,7 +2,8 @@ module ModelHelperFuns
 using UnPack
 
 export scale_parameters, scale_parameters2
-export  fun_H1, fun_H2, fun_alpha1, fun_alpha2, fun_f1, fun_f2, fun_W, fun_S_given_W
+export  fun_H1, fun_H2, fun_alpha1, fun_f1, fun_f2, fun_W
+export fun_W_orig, fun_S_given_W, scale_parameters_orig
 #=
 all functions designed to broadcast over elements of x
 except for fun_S_given_W, which broadcasts over Wx, Wy
@@ -38,6 +39,47 @@ function scale_parameters2(parameters::NamedTuple)
                                 H1a = scale * (A1/A2) * (H2a + H2b) 
                                             - H1b))
 end
+"""
+scale_parameters_orig
+Allometric scaling in original (dimensional) parameter space.
+Given mass_ratio = b1/b2 = (h1a+h1b) / (h2a+h2b), derive b1 and h1b.
+No non-dim corrections (no A_i, k_i factors).
+"""
+function scale_parameters_orig(parameters::NamedTuple)
+    @unpack mass_ratio, b2, h1a, h2a, h2b = parameters
+    return merge(parameters, (
+        b1  = b2 * mass_ratio,
+        h1b = (h2a + h2b) * mass_ratio - h1a
+    ))
+end
+function scale_parameters_orig(parameters::Dict)
+    @unpack mass_ratio, b2, h1a, h2a, h2b = parameters
+    parameters[:b1]  = b2 * mass_ratio
+    parameters[:h1b] = (h2a + h2b) * mass_ratio - h1a
+    return parameters
+end
+
+"""
+fun_W_orig
+Per-capita fecundity W from eq. fecundity_dim using original (dimensional) parameters:
+    W(x,M1,M2) = (b1*f1 + b2*f2)/x
+where f_i is the Type-II functional response (eq. fun_response):
+    f_i = a_i*α_i(x)*M_i / (1 + a1*α1(x)*h1(x)*M1 + a2*α2*h2(x)*M2)
+and h_i(x) = h_ia + h_ib/x.
+Params must contain: a1, a2, b1, b2, h1a, h1b, h2a, h2b, α1_of_1, s1, α2_of_1.
+"""
+function fun_W_orig(x, M1, M2, params)
+    @unpack a1, a2, b1, b2, h1a, h1b, h2a, h2b, α2_of_1 = params
+    h1x  = @. h1a + h1b / x
+    h2x  = @. h2a + h2b / x
+    α1x  = fun_alpha1(x, params)
+    α2   = α2_of_1
+    denom = @. 1 + a1 * α1x * h1x * M1 + a2 * α2 * h2x * M2
+    f1 = @. a1 * α1x * M1 / denom
+    f2 = @. a2 * α2  * M2 / denom
+    return @. (b1 * f1 + b2 * f2) / x
+end
+
 function scale_parameters2(parameters::Dict)
     @unpack scale, β2, η2, A1, A2, H2a, H2b, H1b = parameters
     parameters[:β1] = scale*β2
@@ -65,17 +107,6 @@ function fun_alpha1(x, parameters)
     return @. 1 / (1 + exp(-θ_1 * (x - s1)))
 end
 
-function fun_alpha2(x, parameters)
-    #= retired =#
-    @unpack α2_fun_type, α2_of_1, s2 = parameters
-
-    if α2_fun_type == "constant"
-        return α2_of_1
-    else
-        θ_2 = -log(1 / α2_of_1 - 1) / (1 - s2)
-        return @. 1 / (1 + exp(-θ_2 * (x - s2)))
-    end
-end
 
 fun_f1(x, N1, N2, parameters) = fun_response_non_dim(x, N1, N2, 1, parameters)
 fun_f2(x, N1, N2, parameters) = fun_response_non_dim(x, N1, N2, 2, parameters)

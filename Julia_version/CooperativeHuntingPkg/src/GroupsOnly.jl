@@ -21,8 +21,9 @@ export heatmap_bif_g
 export get_g_equilibria_givenW
 export fun_dg_births_constantP!
 export fun_dg_births_constantP
-export fun_W_gauss, bifurcation_g_input_simpleW
-export fun_dg_simpleW!, fun_dg_simpleW, classify_equilibrium_g_simpleW
+export fun_dg_births_constantP_givenW!
+export fun_W_gauss
+export fun_dg_simpleW!, fun_dg_simpleW
 export make_hm_versus_param
 
 # these were supposed to load with my package but i guess it didn't work
@@ -52,7 +53,8 @@ param_label_dic = Dict(
     :x_max => L"x_{max}",
     :Tg => "Relative Group Dynamics \nTimescale, "*L"T_g",
     :d => L"d",
-    :scale => L"Scale, $\beta_1/\beta_2$"
+    :scale => L"Scale, $\beta_1/\beta_2$",
+    :mass_ratio => L"Mass Ratio, $m_2/m_1$"
 )
 
 function find_mangel_clark(N1, N2, params)
@@ -233,43 +235,6 @@ function fun_W_gauss(x, p)
     W = a .* exp.( - (x .- x0).^2 ./(2*σ^2))
 end
 
-function bifurcation_g_input_simpleW(p, paramkey::Symbol, 
-    paramvec, params_base::Dict{Symbol, Any})
-    #=
-    Loop over elements of paramvec, 
-    finding the g equilibrium and stability for each
-    paramater value
-    =#
-    x_max = params_base[:x_max]
-    # Initialize arrays to store equilibrium g values and their corresponding stability
-    results_g = zeros(length(paramvec), x_max)  # 2D array
-    stability_results = Vector{Bool}(undef, length(paramvec))
-    xvec = 1:x_max
-    params = deepcopy(params_base)
-
-    # Iterate over paramvec
-    for (i, param) in enumerate(paramvec)
-
-        # Update parameters
-        params[paramkey] = param
-
-        # Find the single equilibrium g vector
-        W = fun_W_gauss(xvec,params)
-        gvec = get_g_equilibria_givenW(p, W, params)
-
-        # Get stability
-        stability = classify_equilibrium_g(gvec, N1, N2, params)
-
-        # Store results
-        results_g[i, :] = gvec  # Store the vector as a row
-        stability_results[i] = stability
-    end
-
-    return Dict(
-        :results_g => results_g, 
-        :stability_results => stability_results
-        )
-end
 
 #= add l, phi to p if not there, if p is dict or named tupe =#
 ensure_l_phi(p) = p isa AbstractDict ?
@@ -358,31 +323,6 @@ function fun_dg_simpleW(g, p, T)
     return dg
 end
 
-function classify_equilibrium_g_simpleW(g, N1, N2, params)
-    """
-    Compute the eigenvalues of the Jacobian matrix for just the dynamics of dg(x)/dt.
-    Returns:
-    - "Stable (attractive)"
-    - "Unstable"
-    - "Marginally stable (needs further analysis)"
-    - "Indeterminate stability (needs further analysis)"
-    """
-    # Compute the Jacobian matrix for group dynamics
-    J = ForwardDiff.jacobian(u -> fun_dg_simpleW(u, params, 1),g[1:end-1])
-    #J = Jacobian_g(N1, N2, g, params)
-
-    # Compute the eigenvalues of the Jacobian matrix
-    eigenvalues = eigen(J).values
-    # Check the real parts of the eigenvalues
-    real_parts = real.(eigenvalues)
-
-    # Classify the stability based on the real parts of the eigenvalues
-    if all(real_parts .< 0)
-        return true
-    else
-        return false
-    end
-end
 
 function make_hm_versus_param(
     g0, paramkey, paramvec, params_base, ODE_fun_handle, W_fun_handle;
@@ -448,14 +388,14 @@ function make_hm_versus_param(
         paramvec,
         1:size(pxmat, 2),
         pxmat',
-        c = cgrad(:grays, rev = true),
+        c = cgrad([:white, :black], 256),
         clims = (0.0, findmax(pxmat)[1]),
         xlabel = xlabel_dict[paramkey],
         ylabel = L"Group size, $x$",
     )
     plot!(paramvec, mean_x_vec, label = "Mean Experienced", color = :yellow)
     plot!(paramvec, mc_x_vec, label = "Clark and Mangel", color = :limegreen)
-    plot!(paramvec, x_opt_vec, label = "Optimal", color = :purple)
+    plot!(paramvec, x_opt_vec, label = "Optimal", color = :magenta)
 
     return hm, reached_equilibrium_vec
 end
@@ -472,7 +412,7 @@ function heatmap_bif_g(gmat, P::Number, N1::Number, N2::Number, paramkey, paramv
         paramvec,     # x = rows
         1:size(prob,2),     # y = columns
         prob',              # transpose so rows map to x
-        c = cgrad(:grays, rev=true),    # high values → dark
+        c = cgrad([:white, :black], 256),
         #colorrev=false,      # darker = higher
         xlabel=param_label_dic[paramkey],
         ylabel=L"Group size, $x$",
@@ -491,8 +431,8 @@ function heatmap_bif_g(gmat, P::Number, N1::Number, N2::Number, paramkey, paramv
             x_mc_vec[i] = any(W[2:end] .< W[1]) ? findfirst( W[2:end] .< W[1]) : params[:x_max]
             x_opt_vec[i] = argmax(W)
     end
-    plot!(paramvec, x_mc_vec, label = L"\hat{x}", color = :limegreen)
-    plot!(paramvec, x_opt_vec, label = L"x^*", color = :yellow)
+    plot!(paramvec, x_mc_vec, label = "Clark & Mangel", color = :limegreen)
+    plot!(paramvec, x_opt_vec, label = "Optimal", color = :magenta)
     return hm
 end
 
@@ -586,10 +526,104 @@ function fun_dg_births_constantP!(dg, g, params, T=0)
     end
 end
 
-function fun_dg_births_constantP(g, Wvec, params, T=0)
+"""
+    fun_dg_births_constantP_givenW!(dg, g, params, T=0)
+
+Like fun_dg_births_constantP! but reads Wvec directly from params[:Wvec] instead
+of calling fun_W internally.  No scale_parameters call is made; the caller must
+precompute Wvec and store it in params before passing to an ODE solver.
+
+Typical use with fun_W_orig:
+    scale_parameters_orig(params)
+    params[:Wvec] = fun_W_orig(1:params[:x_max], params[:M1], params[:M2], params)
+    prob = ODEProblem(fun_dg_births_constantP_givenW!, g0, (0.0, t_f), params)
+"""
+function fun_dg_births_constantP_givenW!(dg, g, params, T=0)
+    @unpack x_max, Tg, fuse_param, leave_param, Wvec = params
+
+    xvec = 1:x_max
+
+    W1 = Wvec[1]
+    S_1_x = fun_S_given_W(W1, Wvec, params)
+    P = get_p(g, x_max)
+    δ = sum(xvec .* Wvec .* g) ./ P # death rate, is mu in main text
+
+    allow_births = get(params, :allow_births, 0)
+
+    for x in xvec
+        if x == 1
+            if x_max == 1
+                groups_2_split = 0
+                join_groups = 0
+                leave_larger_grps = 0
+                births = g[1] * Wvec[1]
+                deaths = -δ * g[1]
+            else
+                groups_2_split = 4 * g[2] * S_1_x[2] / Tg
+                join_groups = -(g[1] / Tg) * sum(g[2:end-1] .* (1 .- S_1_x[3:end]))
+                join_groups_singletonsfuse = -(g[1] / Tg) * g[1] * (1 .- S_1_x[2])
+                births = x_max * g[x_max] * Wvec[x_max] - g[1] * Wvec[1]
+                deaths = 2 * δ * g[2] - δ * g[1]
+                if x_max > 2
+                    leave_larger_grps = sum(xvec[3:end] .* g[3:end] .* S_1_x[3:end]) / Tg
+                else
+                    leave_larger_grps = 0
+                end
+            end
+            dg[1] = (leave_param * (groups_2_split + leave_larger_grps) + join_groups +
+                    fuse_param * join_groups_singletonsfuse +
+                    allow_births * (births + deaths))
+
+        elseif x == 2
+            individual_leaves = -2 * g[2] * S_1_x[2] / Tg
+            if x_max == 2
+                threes_to_pairs = 0
+                pairs_to_threes = 0
+                deaths = -2 * δ * g[2]
+                births = g[1] * Wvec[1]
+            else
+                pairs_to_threes = -g[2] * g[1] * (1 - S_1_x[3]) / Tg
+                threes_to_pairs = 3 * g[3] * S_1_x[3] / Tg
+                deaths = δ * (3 * g[3] - 2 * g[2])
+                births = g[1] * Wvec[1] - 2 * g[2] * Wvec[2]
+            end
+            form_dyads = g[1]^2 * (1 - S_1_x[2]) / (2 * Tg)
+            dg[2] = (leave_param * (individual_leaves + threes_to_pairs) +
+                    pairs_to_threes + fuse_param * form_dyads +
+                    allow_births * (births + deaths))
+
+        elseif x == x_max
+            individual_leaves = -x * g[x] * S_1_x[x] / Tg
+            smaller_grp_grows_to_xm = g[x - 1] * g[1] * (1 - S_1_x[x]) / Tg
+            births = (x - 1) * g[x - 1] * Wvec[x - 1]
+            deaths = -δ * g[x] * x
+            dg[x] = (
+                leave_param * individual_leaves + smaller_grp_grows_to_xm +
+                allow_births * (births + deaths)
+            )
+
+        else
+            individual_leaves = -(x / Tg) * g[x] * S_1_x[x]
+            grows_to_larger_grp = -g[x] * g[1] * (1 - S_1_x[x + 1]) / Tg
+            smaller_grp_grows_to_x = g[x - 1] * g[1] * (1 - S_1_x[x]) / Tg
+            larger_grps_shrink = (x + 1) * g[x + 1] * S_1_x[x + 1] / Tg
+            births = (x - 1) * g[x - 1] * Wvec[x - 1] - x * g[x] * Wvec[x]
+            deaths = δ * ((x + 1) * g[x + 1] - x * g[x])
+            dg[x] = (
+                leave_param * (individual_leaves + larger_grps_shrink) +
+                    grows_to_larger_grp + smaller_grp_grows_to_x +
+                    allow_births * (births + deaths)
+            )
+        end
+    end
+end
+
+function fun_dg_births_constantP(g, params, T=0)
     dg = similar(g)
-    fun_dg_births_constantP!(dg, g, Wvec, params, T)
+    fun_dg_births_constantP!(dg, g, params, T)
     return dg
 end
+
+
 
 end
