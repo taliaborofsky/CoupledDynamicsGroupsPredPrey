@@ -14,6 +14,7 @@ using Polynomials
 using LaTeXStrings
 using Plots
 using DifferentialEquations
+using Measures
 
 export find_mangel_clark, get_g_equilibria, classify_equilibrium_g
 export update_params, bifurcation_g_input, get_x_maximizes_pc_fitness
@@ -24,6 +25,7 @@ export fun_dg_births_constantP
 export fun_W_gauss
 export fun_dg_simpleW!, fun_dg_simpleW
 export make_hm_versus_param
+export make_hm_versus_param_solve_g
 
 # these were supposed to load with my package but i guess it didn't work
 ylabel_dic = Dict(
@@ -53,7 +55,10 @@ param_label_dic = Dict(
     :Tg => "Relative Group Dynamics \nTimescale, "*L"T_g",
     :d => L"d",
     :scale => L"Scale, $\beta_1/\beta_2$",
-    :mass_ratio => L"Mass Ratio, $m_2/m_1$"
+    :mass_ratio => L"Mass Ratio, $m_2/m_1$",
+    :σ => L"Standard Deviation of $W$, $\sigma$",
+    :a => L"Maximum Fitness Height, $a$",
+    :x0 => L"Group Size that Maximizes Fitness, $x^*$"
 )
 
 function find_mangel_clark(N1, N2, params)
@@ -533,6 +538,93 @@ function fun_dg_births_constantP(g, params, T=0)
     return dg
 end
 
+
+function plot_hm_with_lines(prob, x_max, paramvec, paramkey,
+            x_opt_vec, x_mc_vec, mean_x_vec; offsets = [+0.4, 0.4, -0.4]
+        )
+    hm = heatmap(
+            paramvec,
+            1:size(prob, 2),
+            prob',
+            c = cgrad([:white, :black], 256),
+            xlabel = "\n" * param_label_dic[paramkey],
+            ylabel = L"Group size, $x$",
+            ylims = [1, x_max],
+            bottom_margin=5mm
+        )
+    plot!(paramvec, x_mc_vec, label = "Clark & Mangel", color = :limegreen)
+    plot!(paramvec, mean_x_vec, label = "Mean Exp.", color = :yellow)
+    plot!(paramvec, x_opt_vec, label = "Optimal", color = :magenta)
+    annotate!(paramvec[end-5], x_mc_vec[end] + offsets[1], text("Clark & Mangel", :black, :right, 12))
+    annotate!(paramvec[end-5], mean_x_vec[end] + offsets[2], text("Mean Experienced", :black, :right, 12))
+    annotate!(paramvec[end-5], x_opt_vec[end] + offsets[3], text("Optimal", :black, :right, 12))
+    return hm
+end
+
+"""
+Makes a heatmap of the probability of being in each group size at equilibria,
+in relation to the param specified by paramkey
+
+offsets = [mangel clark offset, mean experienced offset, optimal W offset]
+
+Returns (hm, λ_max_vec) where λ_max_vec[i] is the leading real part of the
+Jacobian eigenvalues at the equilibrium for paramvec[i].
+"""
+function make_hm_versus_param_solve_g(
+    paramkey, paramvec, params_base_orig;
+    t_f = 50000.0, offsets = [+0.4, 0.4, -0.4],
+    W_fun = (x, p) -> fun_W_orig(x, p[:M1], p[:M2], p),
+    scale_fun = scale_parameters_orig,
+    g0_births = nothing   # optional starting point for the ODE; defaults to analytical equilibrium
+    )
+
+    @unpack P, x_max = params_base_orig
+
+    xvec = 1:x_max
+
+    results_g = zeros(length(paramvec), x_max)
+    params = deepcopy(params_base_orig)
+    x_mc_vec = similar(paramvec)
+    x_opt_vec = similar(paramvec)
+    mean_x_vec = similar(paramvec)
+    λ_max_vec = similar(paramvec)
+
+    for (i, param) in enumerate(paramvec)
+        params[paramkey] = param
+        scale_fun(params)
+
+        W = W_fun(xvec, params)
+        params[:Wvec] = W
+        gvec = get_g_equilibria_givenW(P, W, params)
+
+        g0 = (!isnothing(g0_births) && get(params, :allow_births, 0) != 0) ? g0_births : gvec[1:end-1]
+        prob = ODEProblem(fun_dg_births_givenW!, g0, (0.0, t_f), params)
+        sol = solve(prob)
+        g_short = sol[:, end]
+        g_xmax = (P - sum((1:x_max-1) .* g_short)) / x_max
+        gvec = vcat(g_short, g_xmax)
+
+        J = ForwardDiff.jacobian(
+            g -> (dg = similar(g); fun_dg_births_givenW!(dg, g, params, 0); dg),
+            gvec[1:end-1]
+        )
+        λ_max_vec[i] = maximum(real.(eigen(J).values))
+
+        results_g[i, :] = gvec
+        x_opt_vec[i] = argmax(W)
+        x_mc_vec[i] = any(W[2:end] .< W[1]) ? findfirst(W[2:end] .< W[1]) : x_max
+        mean_x_vec[i] = get_meanx(gvec, x_max)
+    end
+
+    prob = get_prob_in_x(results_g, P, x_max)
+
+    hm = plot_hm_with_lines(
+        prob, x_max, paramvec, paramkey, x_opt_vec, x_mc_vec, mean_x_vec;
+        offsets = offsets
+    )
+
+    return hm, λ_max_vec
+end
 
 
 end

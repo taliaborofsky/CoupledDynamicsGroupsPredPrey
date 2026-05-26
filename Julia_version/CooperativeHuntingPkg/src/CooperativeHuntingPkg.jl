@@ -43,6 +43,7 @@ export fun_dg_births_constantP
 export fun_W_gauss
 export fun_dg_simpleW!, fun_dg_simpleW
 export make_hm_versus_param
+export make_hm_versus_param_solve_g
 
 
 
