@@ -22,6 +22,7 @@ export fun_W_orig, scale_parameters_orig
 
 # ModelFuns
 export fun_dg_nopop!, fun_dg_nopop
+export fun_dg_births_givenW!
 
 # AnalyzeResults
 export get_p, get_meanx, get_prob_in_x
@@ -42,7 +43,6 @@ export fun_dg_births_constantP
 export fun_W_gauss
 export fun_dg_simpleW!, fun_dg_simpleW
 export make_hm_versus_param
-export fun_dg_births_constantP_givenW!
 
 
 
