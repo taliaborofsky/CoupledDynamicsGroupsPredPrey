@@ -4,6 +4,7 @@ using UnPack
 export scale_parameters, scale_parameters2
 export  fun_H1, fun_H2, fun_alpha1, fun_f1, fun_f2, fun_W
 export fun_W_orig, fun_S_given_W, scale_parameters_orig
+export fun_S_grouplevel
 #=
 all functions designed to broadcast over elements of x
 except for fun_S_given_W, which broadcasts over Wx, Wy
@@ -152,6 +153,37 @@ end
 function fun_S_given_W(Wx,Wy, parameters)
     @unpack d = parameters
     S = @. 1 /(1 + exp(-d*(Wx - Wy)))
+end
+
+"""
+    fun_S_grouplevel(Wvec, params)
+
+Best-response functions for a version of the model in which individuals
+compare the group's per-capita fecundity before and after a join/leave
+transition (i.e., "group fitness"), rather than comparing to the fecundity
+of a solitary individual, W(1).
+
+For the transition between group size x-1 and x (x = 2, ..., length(Wvec)):
+    S_leave[x] = P(an individual leaves a group of size x, forming x-1)
+               = 1 / (1 + exp(-d*(W(x-1) - W(x))))
+    S_join[x]  = P(a singleton joins a group of size x-1, forming x)
+               = 1 - S_leave[x] = 1 / (1 + exp(-d*(W(x) - W(x-1))))
+
+Index 1 of each returned vector is a placeholder (there is no transition
+into/out of a "group of size 0") and is never used downstream.
+
+Returns (S_leave, S_join).
+"""
+function fun_S_grouplevel(Wvec, params)
+    @unpack d = params
+    n = length(Wvec)
+    S_leave = similar(Wvec, Float64)
+    S_leave[1] = 0.5 # placeholder; unused
+    for x in 2:n
+        S_leave[x] = 1 / (1 + exp(-d * (Wvec[x-1] - Wvec[x])))
+    end
+    S_join = 1 .- S_leave
+    return S_leave, S_join
 end
 
 end

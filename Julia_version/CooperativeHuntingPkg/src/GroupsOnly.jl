@@ -20,6 +20,7 @@ export find_mangel_clark, get_g_equilibria, classify_equilibrium_g
 export update_params, bifurcation_g_input, get_x_maximizes_pc_fitness
 export heatmap_bif_g
 export get_g_equilibria_givenW
+export get_g_equilibria_givenW_grouplevel
 export fun_dg_births_constantP!
 export fun_dg_births_constantP
 export fun_W_gauss
@@ -219,6 +220,55 @@ function get_g_equilibria_givenW(P, W, params)
     # Compute coefficients for g(1)
     coefficients = [x * ϕ/2 * prod(c_vec[1:x]) for x in xvec]  # Reverse order
     coefficients[1] = 1.0 # the coefficient of g_1 
+
+    coeff_full = vcat(-P, coefficients)  # Append -P to the coefficients
+    # Find roots
+    roots_all = roots(Polynomials.Polynomial(coeff_full))
+
+    # Filter real positive roots. there should only be one.
+    g1 = real(filter(x -> isreal(x) && real(x) > 0, roots_all)[1])
+
+    # Compute g(x) for each g1 root
+    gvec = [0.5 * ϕ * prod(c_vec[1:x]) * g1^x for x in xvec]
+    gvec[1] = g1
+
+    return gvec
+end
+
+"""
+    get_g_equilibria_givenW_grouplevel(P, W, params)
+
+Same as `get_g_equilibria_givenW`, but for the version of the model in which
+individuals compare the group's fecundity before and after joining/leaving
+(i.e., "group fitness") rather than comparing to the fecundity of a
+solitary individual. Uses `fun_S_grouplevel` instead of `fun_S_given_W`.
+
+The closed-form relationship g_x = g_1 g_{x-1} * S_J(x) / (l * x * (1-S_J(x)))
+(SI eq. `gx_interms_gxminus1`) holds regardless of how S_J(x) is defined, so
+the rest of the derivation (and this function) is unchanged.
+
+Returns gvec.
+"""
+function get_g_equilibria_givenW_grouplevel(P, W, params)
+    x_max = params[:x_max]
+    xvec = 1:x_max
+
+    # if no l, phi in params, then set equal to 1
+    for k in (:leave_param, :fuse_param)
+        get!(params, k, 1)
+    end
+
+    @unpack leave_param,fuse_param = params
+    l, ϕ = leave_param, fuse_param
+    # Get the root for g(1)
+
+    S_of_1_x, S_of_x_1 = fun_S_grouplevel(W, params)
+    c_vec = S_of_x_1./(l .* xvec.* S_of_1_x)
+    c_vec[1] = 1.0
+
+    # Compute coefficients for g(1)
+    coefficients = [x * ϕ/2 * prod(c_vec[1:x]) for x in xvec]  # Reverse order
+    coefficients[1] = 1.0 # the coefficient of g_1
 
     coeff_full = vcat(-P, coefficients)  # Append -P to the coefficients
     # Find roots
@@ -575,7 +625,14 @@ function make_hm_versus_param_solve_g(
     t_f = 50000.0, offsets = [+0.4, 0.4, -0.4],
     W_fun = (x, p) -> fun_W_orig(x, p[:M1], p[:M2], p),
     scale_fun = scale_parameters_orig,
-    g0_births = nothing   # optional starting point for the ODE; defaults to analytical equilibrium
+    g0_births = nothing,   # optional starting point for the ODE; defaults to analytical equilibrium
+    dg_fun = fun_dg_births_givenW!,   # ODE right-hand side; pass fun_dg_births_givenW_grouplevel!
+                                       # for the version where individuals compare group fitness
+                                       # before/after joining or leaving, rather than their own
+                                       # fitness relative to being solitary
+    equilibria_fun = get_g_equilibria_givenW   # analytical equilibrium solver matching dg_fun;
+                                                 # pass get_g_equilibria_givenW_grouplevel to match
+                                                 # fun_dg_births_givenW_grouplevel!
     )
 
     @unpack P, x_max = params_base_orig
@@ -595,17 +652,17 @@ function make_hm_versus_param_solve_g(
 
         W = W_fun(xvec, params)
         params[:Wvec] = W
-        gvec = get_g_equilibria_givenW(P, W, params)
+        gvec = equilibria_fun(P, W, params)
 
         g0 = (!isnothing(g0_births) && get(params, :allow_births, 0) != 0) ? g0_births : gvec[1:end-1]
-        prob = ODEProblem(fun_dg_births_givenW!, g0, (0.0, t_f), params)
+        prob = ODEProblem(dg_fun, g0, (0.0, t_f), params)
         sol = solve(prob)
         g_short = sol[:, end]
         g_xmax = (P - sum((1:x_max-1) .* g_short)) / x_max
         gvec = vcat(g_short, g_xmax)
 
         J = ForwardDiff.jacobian(
-            g -> (dg = similar(g); fun_dg_births_givenW!(dg, g, params, 0); dg),
+            g -> (dg = similar(g); dg_fun(dg, g, params, 0); dg),
             gvec[1:end-1]
         )
         λ_max_vec[i] = maximum(real.(eigen(J).values))
