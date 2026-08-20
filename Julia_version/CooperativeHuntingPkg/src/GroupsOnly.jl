@@ -2,10 +2,8 @@ module GroupsOnly
 
 include("ModelHelperFuns.jl")
 include("ModelFuns.jl")
-include("AnalyzeResults.jl")
 using .ModelHelperFuns
 using .ModelFuns
-using .AnalyzeResults
 
 using UnPack
 using LinearAlgebra
@@ -16,17 +14,32 @@ using Plots
 using DifferentialEquations
 using Measures
 
+# note: fun_dg_births_constantP!, fun_dg_births_constantP, fun_W_gauss,
+# fun_dg_simpleW!, fun_dg_simpleW now live in ModelFuns.jl (imported via
+# `using .ModelFuns` above); get_p, get_meanx, get_prob_in_x now live in
+# ModelHelperFuns.jl (imported via `using .ModelHelperFuns` above).
+# AnalyzeResults.jl has otherwise been merged into this module
+# (condition_mc, condition_mc_bounds, calculate_C, between are defined below).
+
 export find_mangel_clark, get_g_equilibria, classify_equilibrium_g
 export update_params, bifurcation_g_input, get_x_maximizes_pc_fitness
 export heatmap_bif_g
 export get_g_equilibria_givenW
 export get_g_equilibria_givenW_grouplevel
-export fun_dg_births_constantP!
-export fun_dg_births_constantP
-export fun_W_gauss
-export fun_dg_simpleW!, fun_dg_simpleW
 export make_hm_versus_param
 export make_hm_versus_param_solve_g
+# advisor said the condition_mc / Mangel-Clark-recovery check isn't useful --
+# commented out below (calculate_C, between, condition_mc, condition_mc_bounds,
+# check_/plot_condition_mc_*_versus_param, test_g_ranking_within_condition_mc_bounds,
+# summarize_g_ranking_test), so these exports are commented out too.
+# export condition_mc, condition_mc_bounds
+# export check_condition_mc_versus_param
+# export plot_condition_mc_versus_param
+# export check_condition_mc_bounds_versus_param
+# export plot_condition_mc_bounds_versus_param
+# export test_g_ranking_within_condition_mc_bounds
+# export summarize_g_ranking_test
+
 
 # these were supposed to load with my package but i guess it didn't work
 ylabel_dic = Dict(
@@ -77,12 +90,15 @@ function find_mangel_clark(N1, N2, params)
 end
 
 
+
 function get_g_equilibria(P, N1, N2, params)
     """
     Finds all the g(x) equilibria for a certain p, N1, N2 combination.
     Assumes population sizes are constant.
 
     Returns gvec
+
+    THIS MIGHT NOT BE USED ANYMORE
     """
     x_max = params[:x_max]
     xvec = 1:x_max
@@ -284,100 +300,6 @@ function get_g_equilibria_givenW_grouplevel(P, W, params)
     return gvec
 end
 
-function fun_W_gauss(x, p)
-    @unpack a, x0, σ = p # height, x that maximizes fecundity, standard deviation
-    W = a .* exp.( - (x .- x0).^2 ./(2*σ^2))
-end
-
-
-#= add l, phi to p if not there, if p is dict or named tupe =#
-ensure_l_phi(p) = p isa AbstractDict ?
-    (get!(p, :l, 1); get!(p, :phi, 1.0); p) :
-    (; p..., l = get(p, :l, 1.0), phi = get(p, :phi, 1.0))
-
-
-
-function fun_dg_simpleW!(dg, g, p, T)
-#=
-Group dynamics with leaving and singletons "modulated" by a leave_param and fuse_param
-Uses a gaussian W
-=#
-    # p - parameters - has a, x0, σ, Tg, d, and x_max
-    
-    # if no l, phi in paramater dictionary (called p), then set equal to 1
-    p = ensure_l_phi(p)
-    # for k in (:leave_paaram, :fuse_param)
-    #     get!(p, k, 1)
-    # end
-    # unpack basic ingredients
-    @unpack x_max, Tg, fuse_param, leave_param = p
-    xvec = 1:x_max
-
-    # i'll need fitnesses and best response functions
-    Wvec = fun_W_gauss(xvec, p) 
-    W1 = Wvec[1]
-    S_1_x = fun_S_given_W(Wvec[1],Wvec, p)
-    for x in xvec
-        if x==1
-            if x_max == 1
-                groups_2_split = 0
-                join_groups = 0
-                leave_larger_grps = 0
-            else
-                groups_2_split = 4*g[2]*S_1_x[2]/Tg
-                join_groups = -(g[1]/Tg)*sum(g[2:end-1].*(1 .- S_1_x[3:end]))
-                join_groups_singletonsfuse = - (g[1]./ Tg) .*g[1] .* (1 .- S_1_x[2]) 
-                if x_max > 2
-                    leave_larger_grps = sum(xvec[3:end].*g[3:end].*S_1_x[3:end])/Tg
-                else
-                    leave_larger_grps = 0
-                end
-            end
-            dg[1] = (leave_param * (groups_2_split + leave_larger_grps) + join_groups 
-                        + fuse_param * join_groups_singletonsfuse)
-
-        elseif x == 2
-            individual_leaves = - 2*g[2]*S_1_x[2]/Tg
-            if x_max == 2
-                threes_to_pairs = 0
-                pairs_to_threes = 0
-            else
-                pairs_to_threes = - g[2]*g[1]*(1-S_1_x[3])/Tg
-                threes_to_pairs = 3*g[3]*S_1_x[3]/Tg
-                # deaths = td * (3*g[3] - 2*g[2])
-                # births = g[1]*Wvec[1] - 2*g[2]*Wvec[2]
-            end
-            form_dyads = (g[1])^2*(1-S_1_x[2])/(2*Tg)
-            dg[2] = (leave_param * (individual_leaves + threes_to_pairs) 
-                    + pairs_to_threes + fuse_param * form_dyads 
-                )
-
-        elseif x == x_max
-            individual_leaves = - x*g[x]*S_1_x[x]/Tg
-            smaller_grp_grows_to_xm  = g[x-1]*g[1]*(1-S_1_x[x])/Tg
-            dg[x] = (leave_param * individual_leaves + smaller_grp_grows_to_xm )
-
-        else
-            individual_leaves = -(x/Tg)*g[x]*S_1_x[x]
-            grows_to_larger_grp = - g[x]*g[1]*(1 - S_1_x[x+1])/Tg
-            smaller_grp_grows_to_x = g[x-1]*g[1]*(1-S_1_x[x])/Tg
-            larger_grps_shrink = (x+1)*g[x+1]*S_1_x[x+1]/Tg
-            dg[x] = (leave_param * (individual_leaves + larger_grps_shrink) 
-                    + grows_to_larger_grp + smaller_grp_grows_to_x
-                 )
-            
-        end
-        # do something with x 
-    end
-end
-
-function fun_dg_simpleW(g, p, T)
-    dg = deepcopy(g)
-    fun_dg_simpleW!(dg, g, p, T)
-    return dg
-end
-
-
 function make_hm_versus_param(
     g0, paramkey, paramvec, params_base, ODE_fun_handle, W_fun_handle;
     t_f = 50000)
@@ -492,103 +414,6 @@ function heatmap_bif_g(gmat, P::Number, N1::Number, N2::Number, paramkey, paramv
     return hm
 end
 
-function fun_dg_births_constantP!(dg, g, params, T=0)
-    """
-    Finds dg/dt if there are births and deaths but the population size stays constant
-    N1, N2 (essential for calculating W) given in params
-    In place
-    """
-    params = scale_parameters(params)
-
-    @unpack x_max, Tg, fuse_param, leave_param, N1, N2 = params
-
-    xvec = 1:x_max
-    Wvec = fun_W(xvec,N1, N2,params)
-
-    W1 = Wvec[1]
-    S_1_x = fun_S_given_W(W1, Wvec, params)
-    P = get_p(g, x_max)
-    δ = sum(xvec .* Wvec .* g) ./ P
-
-    # find out if allow births and deaths
-    allow_births = get(params, :allow_births, 0)
-    @unpack allow_births = params
-
-    for x in xvec
-        if x == 1
-            if x_max == 1
-                groups_2_split = 0
-                join_groups = 0
-                leave_larger_grps = 0
-                births = g[1] * Wvec[1]
-                deaths = -δ * g[1]
-            else
-                groups_2_split = 4 * g[2] * S_1_x[2] / Tg
-                join_groups = -(g[1] / Tg) * sum(g[2:end-1] .* (1 .- S_1_x[3:end]))
-                join_groups_singletonsfuse = -(g[1] / Tg) * g[1] * (1 .- S_1_x[2])
-                births = x_max * g[x_max] * Wvec[x_max] - g[1] * Wvec[1]
-                deaths = 2 * δ * g[2] - δ * g[1]
-                if x_max > 2
-                    leave_larger_grps = sum(xvec[3:end] .* g[3:end] .* S_1_x[3:end]) / Tg
-                else
-                    leave_larger_grps = 0
-                end
-            end
-            dg[1] = (leave_param * (groups_2_split + leave_larger_grps) + join_groups +
-                    fuse_param * join_groups_singletonsfuse + 
-                    allow_births * (births + deaths))
-
-        elseif x == 2
-            individual_leaves = -2 * g[2] * S_1_x[2] / Tg
-            if x_max == 2
-                threes_to_pairs = 0
-                pairs_to_threes = 0
-                deaths = -2 * δ * g[2]
-                births = g[1] * Wvec[1]
-            else
-                pairs_to_threes = -g[2] * g[1] * (1 - S_1_x[3]) / Tg
-                threes_to_pairs = 3 * g[3] * S_1_x[3] / Tg
-                deaths = δ * (3 * g[3] - 2 * g[2])
-                births = g[1] * Wvec[1] - 2 * g[2] * Wvec[2]
-            end
-            form_dyads = g[1]^2 * (1 - S_1_x[2]) / (2 * Tg)
-            dg[2] = (leave_param * (individual_leaves + threes_to_pairs) +
-                    pairs_to_threes + fuse_param * form_dyads + 
-                    allow_births*(births + deaths))
-
-        elseif x == x_max
-            individual_leaves = -x * g[x] * S_1_x[x] / Tg
-            smaller_grp_grows_to_xm = g[x - 1] * g[1] * (1 - S_1_x[x]) / Tg
-            births = (x - 1) * g[x - 1] * Wvec[x - 1]
-            deaths = -δ * g[x] * x
-            dg[x] = (
-                leave_param * individual_leaves + smaller_grp_grows_to_xm + 
-                allow_births* (births + deaths)
-            )
-
-        else
-            individual_leaves = -(x / Tg) * g[x] * S_1_x[x]
-            grows_to_larger_grp = -g[x] * g[1] * (1 - S_1_x[x + 1]) / Tg
-            smaller_grp_grows_to_x = g[x - 1] * g[1] * (1 - S_1_x[x]) / Tg
-            larger_grps_shrink = (x + 1) * g[x + 1] * S_1_x[x + 1] / Tg
-            births = (x - 1) * g[x - 1] * Wvec[x - 1] - x * g[x] * Wvec[x]
-            deaths = δ * ((x + 1) * g[x + 1] - x * g[x])
-            dg[x] = (
-                leave_param * (individual_leaves + larger_grps_shrink) +
-                    grows_to_larger_grp + smaller_grp_grows_to_x + 
-                    allow_births * (births + deaths)
-            )
-        end
-    end
-end
-
-function fun_dg_births_constantP(g, params, T=0)
-    dg = similar(g)
-    fun_dg_births_constantP!(dg, g, params, T)
-    return dg
-end
-
-
 function plot_hm_with_lines(prob, x_max, paramvec, paramkey,
             x_opt_vec, x_mc_vec, mean_x_vec; offsets = [+0.4, 0.4, -0.4]
         )
@@ -683,5 +508,402 @@ function make_hm_versus_param_solve_g(
     return hm, λ_max_vec
 end
 
+# ==============================================================================
+# Everything below, until the matching block-comment close near the end of the
+# module, checks whether the equilibrium g(1) recovers the Mangel & Clark
+# prediction (condition_mc / Lemma result_condition_mc). Commented out:
+# advisor's feedback was that this check isn't useful. Left in place (rather
+# than deleted) in case it's wanted again.
+# ==============================================================================
+#=
+# Functions for checking whether g1 in bounds so mangel clark condition recovered
+    function calculate_C(W, params)
+        """
+        calculates C(x) given W(x) for each x
+        CHECK
+        """
+
+        # get l, the leaving paramater
+        get!(params, :leave_param, 1)
+        l = params[:leave_param]
+
+        # xvec
+        xvec = collect(1:params[:x_max])
+
+        # get best response functions
+        S_J = fun_S_given_W(W, W[1], params)
+        S_L = 1 .- S_J
+
+        # now find C
+        C = S_J./(l .* xvec.* S_L)
+        C[1] = 1.0
+        return C
+    end
+
+    function between(x, lower, upper)
+        if x isa Number
+            return lower < x < upper
+        else
+            return all((lower .< x) .& (x .< upper))
+        end
+    end
+
+    function condition_mc(g₁, x̂, W, params)
+        """
+
+        Condition for which the group size experienced by the most individuals is 
+        the mangel and clark prediction, x̂
+        Inputs: g1 at equilibrium (VECTOR), x̂ (mangel and clark prediction)
+
+        Returns True/False
+
+        NEED TO CHECK
+        """
+        C = calculate_C(W, params)
+
+        # lower bound
+        lower = (x̂ - 1) / (x̂ * C[x̂] * C[x̂ - 1])
+
+        # now find upper bound
+        for x in (x̂ + 1):params[:x_max]
+            product = prod(C[k] for k in (x̂ + 1):x)
+
+            upper = (x̂ / x / product)^(1 / (x - x̂))
+
+            if !between(g₁, lower, upper)
+                return false
+            end
+        end
+        return true
+    end
+
+    """
+        condition_mc_bounds(x̂, W, params)
+
+    Diagnostic companion to `condition_mc`: instead of returning a single
+    True/False, returns the actual `lower` bound and every `upper` bound
+    computed in `condition_mc`'s loop (one per x from x̂+1 to x_max), plus
+    their minimum (the binding upper bound). Useful for plotting
+    lower/min_upper against g(1) to see *why* g(1) does or doesn't satisfy
+    condition_mc, and how close it is.
+
+    Returns a NamedTuple: (lower = ..., x_vals = x̂+1:x_max, uppers = [...], min_upper = ...)
+    """
+    function condition_mc_bounds(x̂, W, params)
+        C = calculate_C(W, params)
+
+        lower = (x̂ - 1) / (x̂ * C[x̂] * C[x̂ - 1])
+
+        x_vals = (x̂ + 1):params[:x_max]
+        uppers = Float64[]
+        for x in x_vals
+            product = prod(C[k] for k in (x̂ + 1):x)
+            upper = (x̂ / x / product)^(1 / (x - x̂))
+            push!(uppers, upper)
+        end
+        min_upper = isempty(uppers) ? Inf : minimum(uppers)
+
+        return (lower = lower, x_vals = x_vals, uppers = uppers, min_upper = min_upper)
+    end
+
+
+
+"""
+    check_condition_mc_versus_param(paramkey, paramvec, params_base_orig; kwargs...)
+
+For each value in `paramvec`, solves for the equilibrium group size distribution
+the same way `make_hm_versus_param_solve_g` does (same `W_fun`, `scale_fun`,
+`equilibria_fun`, `dg_fun`, and ODE refinement step), then checks whether g(1)
+at that equilibrium satisfies `condition_mc` (Lemma \\ref{result_condition_mc}
+/ \\ref{result_condition_optimal} in the appendix).
+
+x̂, the Clark & Mangel prediction, is computed exactly as in
+`make_hm_versus_param_solve_g`: the first x such that W(x+1) < W(1)
+(x_max if no such x exists).
+
+Accepts the same keyword arguments as `make_hm_versus_param_solve_g`
+(`t_f`, `W_fun`, `scale_fun`, `g0_births`, `dg_fun`, `equilibria_fun`) so that
+it can be pointed at the exact same parameter set used to build a given panel.
+
+Returns a NamedTuple:
+    g1_vec      : g(1) at equilibrium, for each paramvec value
+    xhat_vec    : x̂ for each paramvec value
+    satisfied   : Union{Bool,Missing} vector; `missing` when x̂ < 2, since
+                  condition_mc's lower bound (which uses C(x̂-1)) isn't
+                  defined there.
+"""
+function check_condition_mc_versus_param(
+    paramkey, paramvec, params_base_orig;
+    t_f = 50000.0,
+    W_fun = (x, p) -> fun_W_orig(x, p[:M1], p[:M2], p),
+    scale_fun = scale_parameters_orig,
+    g0_births = nothing,
+    dg_fun = fun_dg_births_givenW!,
+    equilibria_fun = get_g_equilibria_givenW
+    )
+
+    @unpack P, x_max = params_base_orig
+
+    xvec = 1:x_max
+
+    params = deepcopy(params_base_orig)
+    g1_vec = similar(paramvec, Float64)
+    xhat_vec = Vector{Int}(undef, length(paramvec))
+    satisfied = Vector{Union{Bool,Missing}}(undef, length(paramvec))
+
+    for (i, param) in enumerate(paramvec)
+        params[paramkey] = param
+        scale_fun(params)
+
+        W = W_fun(xvec, params)
+        params[:Wvec] = W
+        gvec = equilibria_fun(P, W, params)
+
+        g0 = (!isnothing(g0_births) && get(params, :allow_births, 0) != 0) ? g0_births : gvec[1:end-1]
+        prob = ODEProblem(dg_fun, g0, (0.0, t_f), params)
+        sol = solve(prob)
+        g_short = sol[:, end]
+        g_xmax = (P - sum((1:x_max-1) .* g_short)) / x_max
+        gvec = vcat(g_short, g_xmax)
+
+        x̂ = any(W[2:end] .< W[1]) ? findfirst(W[2:end] .< W[1]) : x_max
+
+        g1_vec[i] = gvec[1]
+        xhat_vec[i] = x̂
+        satisfied[i] = x̂ >= 2 ? condition_mc(gvec[1], x̂, W, params) : missing
+    end
+
+    return (g1_vec = g1_vec, xhat_vec = xhat_vec, satisfied = satisfied)
+end
+
+"""
+    plot_condition_mc_versus_param(paramkey, paramvec, results; kwargs...)
+
+Plots the `satisfied` vector returned by `check_condition_mc_versus_param`
+versus `paramvec`, as a 0/1 step plot (missing values are left as gaps), so it
+can be lined up underneath the corresponding equilibrium heatmap panel.
+"""
+function plot_condition_mc_versus_param(paramkey, paramvec, results; kwargs...)
+    y = [ismissing(s) ? NaN : Float64(s) for s in results.satisfied]
+    plt = plot(paramvec, y;
+        seriestype = :steppost,
+        ylim = (-0.1, 1.1),
+        yticks = ([0, 1], ["fails", "satisfies"]),
+        xlabel = param_label_dic[paramkey],
+        ylabel = "condition_mc",
+        legend = false,
+        kwargs...
+    )
+    return plt
+end
+
+"""
+    check_condition_mc_bounds_versus_param(paramkey, paramvec, params_base_orig; kwargs...)
+
+Diagnostic version of `check_condition_mc_versus_param`: for each value in
+`paramvec`, solves for the equilibrium the same way (same kwargs, same
+meaning), then instead of just True/False, records g(1), x̂, the lower bound,
+and the *minimum* upper bound (the binding one, over x = x̂+1,...,x_max) from
+`condition_mc_bounds`. Plot g1 against `lower` and `min_upper` to see why
+g(1) does or doesn't satisfy condition_mc for a given paramvec value.
+
+Returns a NamedTuple:
+    g1_vec        : g(1) at equilibrium, for each paramvec value
+    xhat_vec      : x̂ for each paramvec value
+    lower_vec     : the lower bound, for each paramvec value (NaN when x̂ < 2)
+    min_upper_vec : the binding (minimum) upper bound, for each paramvec value (NaN when x̂ < 2)
+"""
+function check_condition_mc_bounds_versus_param(
+    paramkey, paramvec, params_base_orig;
+    t_f = 50000.0,
+    W_fun = (x, p) -> fun_W_orig(x, p[:M1], p[:M2], p),
+    scale_fun = scale_parameters_orig,
+    g0_births = nothing,
+    dg_fun = fun_dg_births_givenW!,
+    equilibria_fun = get_g_equilibria_givenW
+    )
+
+    @unpack P, x_max = params_base_orig
+
+    xvec = 1:x_max
+
+    params = deepcopy(params_base_orig)
+    g1_vec = similar(paramvec, Float64)
+    xhat_vec = Vector{Int}(undef, length(paramvec))
+    lower_vec = fill(NaN, length(paramvec))
+    min_upper_vec = fill(NaN, length(paramvec))
+
+    for (i, param) in enumerate(paramvec)
+        params[paramkey] = param
+        scale_fun(params)
+
+        W = W_fun(xvec, params)
+        params[:Wvec] = W
+        gvec = equilibria_fun(P, W, params)
+
+        g0 = (!isnothing(g0_births) && get(params, :allow_births, 0) != 0) ? g0_births : gvec[1:end-1]
+        prob = ODEProblem(dg_fun, g0, (0.0, t_f), params)
+        sol = solve(prob)
+        g_short = sol[:, end]
+        g_xmax = (P - sum((1:x_max-1) .* g_short)) / x_max
+        gvec = vcat(g_short, g_xmax)
+
+        x̂ = any(W[2:end] .< W[1]) ? findfirst(W[2:end] .< W[1]) : x_max
+
+        g1_vec[i] = gvec[1]
+        xhat_vec[i] = x̂
+
+        if x̂ >= 2
+            bounds = condition_mc_bounds(x̂, W, params)
+            lower_vec[i] = bounds.lower
+            min_upper_vec[i] = bounds.min_upper
+        end
+    end
+
+    return (g1_vec = g1_vec, xhat_vec = xhat_vec, lower_vec = lower_vec, min_upper_vec = min_upper_vec)
+end
+
+"""
+    plot_condition_mc_bounds_versus_param(paramkey, paramvec, results; kwargs...)
+
+Plots g(1), the lower bound, and the (binding) minimum upper bound, all
+against `paramvec`, on a log y-axis (these quantities can span many orders
+of magnitude). g(1) between the two bound curves means condition_mc is
+satisfied at that paramvec value.
+"""
+function plot_condition_mc_bounds_versus_param(paramkey, paramvec, results; kwargs...)
+    plt = plot(paramvec, results.g1_vec;
+        label = "g(1)",
+        yscale = :log10,
+        xlabel = param_label_dic[paramkey],
+        ylabel = "g(1) / bounds (log scale)",
+        legend = :outertopright,
+        kwargs...
+    )
+    plot!(plt, paramvec, results.lower_vec; label = "lower bound")
+    plot!(plt, paramvec, results.min_upper_vec; label = "min upper bound")
+    return plt
+end
+
+"""
+    test_g_ranking_within_condition_mc_bounds(paramkey, paramvec, params_base_orig; kwargs...)
+
+Independent sanity check of `condition_mc` / Lemma \\ref{result_condition_mc}:
+for each value in `paramvec` and each `(leave_param, fuse_param)` pair, this
+computes x̂ and the `condition_mc_bounds` (lower bound, per-x upper bounds),
+samples several g1 values strictly inside `(lower, min_upper)` — i.e. values
+for which `condition_mc` would return `true` — builds the *full* equilibrium
+group-size vector from each sampled g1 via the closed form
+eq. \\ref{equilibrium_groups_g1} (g_x = 0.5*fuse_param*C(x)*C(x-1)*...*C(1)*g1^x,
+with g_1 = g1), and checks that x̂*g_x̂ > x*g_x for every other x — i.e. that
+x̂ really is the most frequently experienced group size, as the Lemma claims.
+
+Unlike `check_condition_mc_versus_param`, this does NOT solve any ODE or
+root-find g1 from P: it directly tests whether condition_mc's bounds are
+*sufficient* for the ranking claim, using synthetic g1 values chosen to just
+satisfy those bounds (not necessarily an actual equilibrium of the dynamics).
+
+kwargs:
+    W_fun            : same meaning as in `make_hm_versus_param_solve_g` (default `fun_W_orig`)
+    scale_fun        : same meaning as in `make_hm_versus_param_solve_g` (default `scale_parameters_orig`)
+    leave_fuse_pairs : Vector of `(leave_param, fuse_param)` pairs to test;
+                       default `[(1.0, 1.0), (0.01, 0.01)]`
+    n_g1_samples     : how many g1 values to sample (log-spaced, strictly
+                       inside `(lower, min_upper)`) per (pair, paramvec value)
+
+Returns a `Vector` of `NamedTuple`s, one per (leave/fuse pair, paramvec value,
+g1 sample) test: `(leave_param, fuse_param, param, xhat, g1, passed, failing_x)`.
+`failing_x` is `nothing` when `passed`, otherwise the first x where the
+ranking failed. Cases where x̂ < 2, or where `(lower, min_upper)` is empty
+(no valid g1), are skipped and not included in the results.
+"""
+function test_g_ranking_within_condition_mc_bounds(
+    paramkey, paramvec, params_base_orig;
+    W_fun = (x, p) -> fun_W_orig(x, p[:M1], p[:M2], p),
+    scale_fun = scale_parameters_orig,
+    leave_fuse_pairs = [(1.0, 1.0), (0.01, 0.01)],
+    n_g1_samples = 5
+    )
+
+    @unpack x_max = params_base_orig
+    xvec = 1:x_max
+
+    results = NamedTuple[]
+
+    for (l, ϕ) in leave_fuse_pairs
+        params = deepcopy(params_base_orig)
+        params[:leave_param] = l
+        params[:fuse_param] = ϕ
+
+        for param in paramvec
+            params[paramkey] = param
+            scale_fun(params)
+
+            W = W_fun(xvec, params)
+            x̂ = any(W[2:end] .< W[1]) ? findfirst(W[2:end] .< W[1]) : x_max
+            x̂ < 2 && continue
+
+            bounds = condition_mc_bounds(x̂, W, params)
+            bounds.lower >= bounds.min_upper && continue  # no valid g1 in range
+
+            C = calculate_C(W, params)
+
+            # log-spaced samples strictly inside (lower, min_upper)
+            log_lo = log(bounds.lower)
+            log_hi = log(bounds.min_upper)
+            fracs = range(0.1, 0.9; length = n_g1_samples)
+            for frac in fracs
+                g1 = exp(log_lo + frac * (log_hi - log_lo))
+
+                gvec = [0.5 * ϕ * prod(C[1:x]) * g1^x for x in xvec]
+                gvec[1] = g1
+
+                xg = xvec .* gvec
+                xg_xhat = xg[x̂]
+
+                failing_x = nothing
+                for x in xvec[2:end]
+                    x == x̂ && continue
+                    if !(xg_xhat > xg[x])
+                        failing_x = x
+                        break
+                    end
+                end
+
+                push!(results, (
+                    leave_param = l, fuse_param = ϕ, param = param,
+                    xhat = x̂, g1 = g1, passed = isnothing(failing_x), failing_x = failing_x
+                ))
+            end
+        end
+    end
+
+    return results
+end
+
+"""
+    summarize_g_ranking_test(results)
+
+Prints a pass/fail summary of `test_g_ranking_within_condition_mc_bounds`'s
+output, grouped by `(leave_param, fuse_param)`, and lists (up to 5) failures
+per group with enough detail to look them up.
+"""
+function summarize_g_ranking_test(results)
+    pairs = unique((r.leave_param, r.fuse_param) for r in results)
+    for (l, ϕ) in pairs
+        subset = filter(r -> r.leave_param == l && r.fuse_param == ϕ, results)
+        n_total = length(subset)
+        n_passed = count(r -> r.passed, subset)
+        println("ℓ=$l, φ=$ϕ: $n_passed/$n_total passed")
+        failures = filter(r -> !r.passed, subset)
+        for r in first(failures, 5)
+            println("  FAIL: param=$(r.param), x̂=$(r.xhat), g1=$(r.g1), failing_x=$(r.failing_x)")
+        end
+        if length(failures) > 5
+            println("  ... and $(length(failures) - 5) more failures")
+        end
+    end
+end
+=#
 
 end
